@@ -4,8 +4,6 @@ End-to-end machine learning project on the UCI Cleveland heart disease dataset: 
 
 > **Educational project. Not a medical diagnostic tool.**
 
-![App – low risk](images/app_low_risk.png)
-![App – high risk](images/app_high_risk.png)
 
 ## Dataset
 
