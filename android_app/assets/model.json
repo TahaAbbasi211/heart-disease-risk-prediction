@@ -1,0 +1,204 @@
+{
+  "format": "heart-risk-linear-formula/1",
+  "description": "Logistic regression exported as a plain formula. prob = sigmoid(intercept + sum(coef_i * x_i)) with x built as numeric(impute median -> standardize) then categorical(impute mode -> one-hot, unknown -> all zeros).",
+  "positive_class": 1,
+  "positive_class_label": "disease",
+  "n_input_features": 13,
+  "input_features": [
+    "age",
+    "trestbps",
+    "chol",
+    "thalach",
+    "oldpeak",
+    "sex",
+    "cp",
+    "fbs",
+    "restecg",
+    "exang",
+    "slope",
+    "ca",
+    "thal"
+  ],
+  "numeric_cols": [
+    "age",
+    "trestbps",
+    "chol",
+    "thalach",
+    "oldpeak"
+  ],
+  "categorical_cols": [
+    "sex",
+    "cp",
+    "fbs",
+    "restecg",
+    "exang",
+    "slope",
+    "ca",
+    "thal"
+  ],
+  "numeric": {
+    "age": {
+      "median": 56.0,
+      "mean": 54.549586776859506,
+      "scale": 8.978372765440131
+    },
+    "trestbps": {
+      "median": 130.0,
+      "mean": 130.95867768595042,
+      "scale": 17.58610302878636
+    },
+    "chol": {
+      "median": 244.5,
+      "mean": 249.8388429752066,
+      "scale": 52.737566192586975
+    },
+    "thalach": {
+      "median": 153.5,
+      "mean": 149.96280991735537,
+      "scale": 22.639527461380734
+    },
+    "oldpeak": {
+      "median": 0.8,
+      "mean": 0.9991735537190083,
+      "scale": 1.1206178835595506
+    }
+  },
+  "categorical": {
+    "sex": {
+      "mode": 1.0,
+      "categories": [
+        0.0,
+        1.0
+      ]
+    },
+    "cp": {
+      "mode": 4.0,
+      "categories": [
+        1.0,
+        2.0,
+        3.0,
+        4.0
+      ]
+    },
+    "fbs": {
+      "mode": 0.0,
+      "categories": [
+        0.0,
+        1.0
+      ]
+    },
+    "restecg": {
+      "mode": 0.0,
+      "categories": [
+        0.0,
+        1.0,
+        2.0
+      ]
+    },
+    "exang": {
+      "mode": 0.0,
+      "categories": [
+        0.0,
+        1.0
+      ]
+    },
+    "slope": {
+      "mode": 1.0,
+      "categories": [
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "ca": {
+      "mode": 0.0,
+      "categories": [
+        0.0,
+        1.0,
+        2.0,
+        3.0
+      ]
+    },
+    "thal": {
+      "mode": 3.0,
+      "categories": [
+        3.0,
+        6.0,
+        7.0
+      ]
+    }
+  },
+  "output_features": [
+    "num__age",
+    "num__trestbps",
+    "num__chol",
+    "num__thalach",
+    "num__oldpeak",
+    "cat__sex_0.0",
+    "cat__sex_1.0",
+    "cat__cp_1.0",
+    "cat__cp_2.0",
+    "cat__cp_3.0",
+    "cat__cp_4.0",
+    "cat__fbs_0.0",
+    "cat__fbs_1.0",
+    "cat__restecg_0.0",
+    "cat__restecg_1.0",
+    "cat__restecg_2.0",
+    "cat__exang_0.0",
+    "cat__exang_1.0",
+    "cat__slope_1.0",
+    "cat__slope_2.0",
+    "cat__slope_3.0",
+    "cat__ca_0.0",
+    "cat__ca_1.0",
+    "cat__ca_2.0",
+    "cat__ca_3.0",
+    "cat__thal_3.0",
+    "cat__thal_6.0",
+    "cat__thal_7.0"
+  ],
+  "coef": [
+    -0.06093617935364578,
+    0.34055918357620335,
+    0.17891988640732026,
+    -0.37247387120659314,
+    0.2595253984583703,
+    -0.7008358908898615,
+    0.6903530973767258,
+    -0.6191759931521417,
+    0.15289842147345625,
+    -0.5747658356904007,
+    1.0305606138559509,
+    0.09285943309213654,
+    -0.10334222660527234,
+    -0.1557750026440852,
+    -0.06773008596181232,
+    0.21302229509276135,
+    -0.27011479216513734,
+    0.25963199865200176,
+    -0.44063939944479896,
+    0.6034274153710208,
+    -0.1732708094393582,
+    -1.4986407773214014,
+    0.3517542457759668,
+    0.6421710867059319,
+    0.49423265132636696,
+    -0.540242895084278,
+    -0.2887306118501925,
+    0.818490713421335
+  ],
+  "intercept": -0.025790416510918256,
+  "metadata": {
+    "model": "LogisticRegression(max_iter=1000, C=1.0)",
+    "C": 1.0,
+    "cv": "StratifiedKFold(n_splits=5, shuffle=True, random_state=42)",
+    "cv_roc_auc_train": 0.9024931590148981,
+    "cv_roc_auc_train_std": 0.01443995119614911,
+    "test_roc_auc": 0.9664502164502166,
+    "test_recall": 0.9285714285714286,
+    "test_precision": 0.8387096774193549,
+    "random_state": 42,
+    "sklearn_version": "1.6.1"
+  }
+}
