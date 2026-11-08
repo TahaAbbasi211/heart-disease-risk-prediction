@@ -1,10 +1,5 @@
 allprojects {
     repositories {
-        // This machine cannot reach dl.google.com / repo.maven.apache.org
-        // directly (the network intercepts them), so we list reachable mirrors
-        // FIRST and keep the official repositories as a fallback.
-        maven { url = uri("https://maven.aliyun.com/repository/google") }
-        maven { url = uri("https://maven.aliyun.com/repository/public") }
         google()
         mavenCentral()
     }

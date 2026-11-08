@@ -16,7 +16,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
 # In Windows, build-name is used as the major, minor, and patch parts
 # of the product and file versions while build-number is used as the build suffix.
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: ^3.13.7
@@ -29,6 +29,12 @@ environment:
 # versions available, run `flutter pub outdated`.
 dependencies:
   flutter:
+    sdk: flutter
+
+  # Flutter's built-in translations and RTL support for Material widgets
+  # (dropdown menus, text selection, date pickers, ...). This is an SDK
+  # package, so it adds no third-party dependency and no network access.
+  flutter_localizations:
     sdk: flutter
 
   # The following adds the Cupertino Icons font to your application.
@@ -61,6 +67,20 @@ flutter:
   # no network access at all. It is a copy of mobile_export/model.json.
   assets:
     - assets/model.json
+
+  # Vazirmatn: a Persian (and Arabic-script) font under the SIL Open Font
+  # License. Only Regular and Bold are bundled to keep the APK small; the
+  # license text sits next to the fonts in assets/fonts/OFL.txt.
+  #
+  # The app applies this family ONLY when the Persian locale is active (see the
+  # MaterialApp `builder` in lib/main.dart). English keeps the platform font.
+  fonts:
+    - family: Vazirmatn
+      fonts:
+        - asset: assets/fonts/Vazirmatn-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Vazirmatn-Bold.ttf
+          weight: 700
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images

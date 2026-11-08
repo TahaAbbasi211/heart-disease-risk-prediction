@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Persian launcher label.
+
+  Android picks the values-<language> folder that matches the phone's language,
+  so a Persian phone shows "ریسک قلبی" on the home screen while every other
+  phone shows the English name from values/strings.xml.
+
+  The manifest refers to @string/app_name, so this is the only place the name
+  is defined.
+-->
+<resources>
+    <string name="app_name">ریسک قلبی</string>
+</resources>
