@@ -44,6 +44,15 @@ Final model: Random Forest. On the held-out test set (61 patients): AUC 0.955, r
 Most influential features: `ca`, `cp`, `thal`, `exang`, `oldpeak`. Directions are clinically plausible (higher max heart rate and no major vessels colored lower the risk; ST depression, exercise-induced angina, reversible thallium defect and age raise it). Cholesterol and fasting blood sugar have almost no effect, consistent with the EDA.
 
 Notably, asymptomatic chest pain (`cp=4`) *raises* predicted risk. This is a known pattern in this dataset and probably reflects that patients were referred for angiography.
+## Offline Android app
+
+An installable Android app (English / Persian) runs the model fully on the phone, with no server and no internet permission. Download the APK from the [Releases](https://github.com/TahaAbbasi211/heart-disease-risk-prediction/releases) page (debug-signed, for personal sideloading only).
+
+The app uses the **Logistic Regression** model, re-implemented as a plain formula (28 coefficients plus the preprocessing constants, stored in `model.json`). It is used instead of the Random Forest because it has a simple closed form and its cross-validated AUC (0.903) is statistically indistinguishable from the Random Forest (0.904). The Streamlit app still uses the Random Forest, so the two apps can give slightly different probabilities.
+
+Correctness: the formula matches scikit-learn's `predict_proba` to within 3e-16 on all 303 rows, and the Dart code is tested against 15 reference cases (tolerance 1e-6). The app UI was tested manually on a phone.
+
+Code: `mobile_export/` (formula export and verification), `android_app/` (Flutter).
 
 ## Limitations
 
@@ -66,5 +75,7 @@ data/           dataset (raw + cleaned)
 notebooks/      EDA, preprocessing, modeling
 model.pkl       trained scikit-learn pipeline
 app.py          Streamlit app
+mobile_export/  formula export + verification
+android_app/    offline Flutter app
 requirements.txt
 ```
