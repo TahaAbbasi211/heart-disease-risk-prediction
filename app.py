@@ -15,7 +15,6 @@ def load_model():
 model = load_model()
 
 st.title("🫀 Heart Disease Risk Prediction")
-st.warning("Educational project. NOT a medical diagnostic tool.")
 
 # هر گزینه: متن نمایشی -> کدی که مدل با آن آموزش دیده
 SEX = {"Female": 0, "Male": 1}

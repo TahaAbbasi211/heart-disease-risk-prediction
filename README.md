@@ -2,9 +2,6 @@
 
 End-to-end machine learning project on the UCI Cleveland heart disease dataset: exploratory analysis, leakage-free preprocessing, model comparison with cross-validation, hyperparameter tuning, explainability (SHAP), and a Streamlit app.
 
-> **Educational project. Not a medical diagnostic tool.**
-
-
 ## Dataset
 
 - UCI Heart Disease dataset, Cleveland subset: 303 patients, 13 features.

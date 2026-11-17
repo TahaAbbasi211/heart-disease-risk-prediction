@@ -4,7 +4,6 @@ A small Flutter app that predicts heart-disease risk **entirely on the phone**.
 There is no server, no API and no network access: the exported model is a JSON
 file bundled inside the APK and all the maths happens locally.
 
-> **Educational project. NOT a medical diagnostic tool.**
 > The risk bands are illustrative cut-offs, not clinical thresholds.
 
 ---
