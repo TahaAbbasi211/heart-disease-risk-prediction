@@ -1,287 +1,121 @@
-# heart_risk_offline — offline Android app
+# BIOVANTA · HEART (`ir.biovanta.heartrisk`) — Offline Android App `V2.0.0`
 
-A small Flutter app that predicts heart-disease risk **entirely on the phone**.
-There is no server, no API and no network access: the exported model is a JSON
-file bundled inside the APK and all the maths happens locally.
+A native Flutter clinical probability instrument that evaluates Cleveland heart-disease risk **100% offline on the phone**. There is no server, no API, no analytics, no persistent storage, and no `INTERNET` permission: the app bundles `assets/model.json` (`heart-risk-linear-formula/2`, copied byte-for-byte from `../mobile_export/model.json`) and runs the exact additive log-odds equations locally in RAM.
 
-> The risk bands are illustrative cut-offs, not clinical thresholds.
+> **Disclaimer:** Educational project. Risk bands (`<35%` lower, `35–65%` moderate, `≥65%` higher — read from `risk_bands` in `model.json`) are illustrative cut-offs, not clinical thresholds. Not for medical decisions.
 
 ---
 
-## What is in here
+## Architecture & File Map
 
 | Path | What it is |
 |---|---|
-| `lib/main.dart` | the whole UI: one form screen with the 13 inputs, validation and the result card |
-| `lib/heart_model.dart` | the entire "machine learning": reads `model.json` and runs the formula |
-| `lib/strings.dart` | every piece of app text, in English and Persian (`AppStrings`) |
-| `lib/input_parsing.dart` | accepts Persian/Arabic digits and both decimal separators |
-| `assets/model.json` | copy of `../mobile_export/model.json` — the exported model |
-| `assets/fonts/` | Vazirmatn Regular + Bold (SIL OFL), used only in Persian |
-| `test/heart_model_test.dart` | unit tests comparing the Dart maths against scikit-learn |
-| `test/input_parsing_test.dart` | unit tests for the Persian/Arabic number parsing |
-| `test/localization_test.dart` | string-map and widget tests for both languages |
-| `test/golden_cases.json` | copy of `../mobile_export/golden_cases.json` — the expected probabilities |
-| `android/` | the Android wrapper (manifest, package id, Gradle config) |
-
-The app id is `com.example.heartrisk` and the Flutter project name is
-`heart_risk_offline`.
+| `lib/main.dart` | `HeartRiskApp` root wiring `appThemeModeNotifier`, `appLocaleNotifier`, RTL directionality, and `Vazirmatn` font (`fa` only) |
+| `lib/heart_model.dart` | Dependency-free schema v2 inference engine (`full_13` with 28 features, `non_invasive_11` with 21 features, JSON-loaded `risk_bands`, two-branch `stableSigmoid`, clinical auto-routing, `HeartValidationException`, internal & external validation metadata) |
+| `lib/presets.dart` | Canonical defaults (`sex=1.0` Male) and 4 one-tap clinical presets matching `heart_risk/presets.py` |
+| `lib/l10n/strings.dart` | Complete English & Persian (`en` / `fa`) UI string tables (`AppStrings` & `AppStringsDelegate`) — labels only, numeric codes invariant |
+| `lib/input_parsing.dart` | Localized number parser (Latin `0-9`, Persian `۰-۹`, Arabic-Indic `٠-٩`, `.` / `٫` / single `,`) |
+| `lib/ui/theme.dart` | BioVanta **Obsidian Dark** & **Clinical Paper Light** dual theme + tabular figure helpers |
+| `lib/ui/heart_controller.dart` | Reactive `ChangeNotifier` managing inputs, mode routing, live validation, and What-If sensitivity state |
+| `lib/ui/instrument_shell.dart` | 3-destination Floating Glass Dock shell (`Assess`, `Explain`, `Lab & Info`) |
+| `lib/ui/assess_tab.dart` | Live gauge hero card, clinical safety auto-routing banner, preset deck, mode switcher, grouped clinical inputs |
+| `lib/ui/explain_tab.dart` | Exact logistic equation card, diverging `Δz` chart (`widgets/delta_z_chart.dart`), interactive What-If sliders, Cleveland collinearity caveat |
+| `lib/ui/lab_info_tab.dart` | Theme/language controls, dynamic `10×5` repeated CV & held-out `test_61` tables, zero-retraining UCI external validation table, offline privacy summary |
+| `assets/model.json` | Byte-for-byte copy of `../mobile_export/model.json` (`16,961` bytes) |
+| `assets/fonts/` | `Vazirmatn-Regular.ttf` (`122,752` bytes) and `Vazirmatn-Bold.ttf` (`123,036` bytes), SIL OFL |
+| `test/golden_cases.json` | Byte-for-byte copy of `../mobile_export/golden_cases.json` (`27` golden vectors across `full_13` & `non_invasive_11`) |
+| `test/heart_model_test.dart` | Schema v2 parity (`< 1e-12` on all 27 golden cases), byte-for-byte asset SHA-256 check, auto-routing safety trap (`row 292`), validation/bounds, `stableSigmoid`, preset verification |
+| `test/input_parsing_test.dart` | Multi-script number & separator parsing tests |
+| `test/localization_test.dart` | EN/FA key parity, preserved clinical terminology, zero storage/network dependency guard, RTL/LTR toggle widget test |
+| `test/widget_test.dart` | Theme toggle, presets, mode switching, unknown `ca`/`thal` auto-routing banner, Explain & Lab tabs, and `360×640` `1.3×` text-scale overflow checks |
+| `android/` | Kotlin wrapper (`ir.biovanta.heartrisk`), adaptive BioVanta launcher icon, R8 rules (`proguard-rules.pro`), fail-closed signing config (`SIGNING.md`, `signing_setup.ps1`) |
 
 ---
 
-## Languages
+## Dual-Mode Clinical Inference & Safety Auto-Routing
 
-The app ships **English (`en`) and Persian (`fa`)**.
+`HeartModel.predict(inputs, mode: ...)` implements schema **`heart-risk-linear-formula/2`**:
 
-* **English is the default.** A device whose language the app does not ship
-  gets English.
-* A device set to Persian starts in Persian (right-to-left).
-* The button in the AppBar switches language at runtime. It is labelled with the
-  language you would switch **to**: it reads **فارسی** in the English UI and
-  **English** in the Persian UI.
-* **The choice is not saved.** There is no `shared_preferences`, no database and
-  no file writing anywhere in the app — reopen it and you are back to the device
-  language. That is deliberate: the app stores nothing.
+1. **Numeric (`age`, `trestbps`, `chol`, `thalach`, `oldpeak`):** `null` → training median, then `(value - mean) / scale`.
+2. **Categorical (`full_13`: `sex`, `cp`, `fbs`, `restecg`, `exang`, `slope`, `ca`, `thal`; `non_invasive_11`: omits `ca`, `thal`):** `null` → training mode, then one-hot encoding (`handle_unknown="ignore"` parity when `validate: false`).
+3. **Log-odds & Probability:** `z = intercept + sum(coef[i] * x[i])`, `probability = stableSigmoid(z)`.
+4. **Clinical Safety Auto-Routing (`mode: "auto"`):** If either fluoroscopy (`ca`) or thallium (`thal`) is marked **Not tested / Unknown** (`null`), inference automatically routes to **`non_invasive_11`** (`21` features) instead of silently imputing `ca=0, thal=3` (which would falsely lower log-odds by `-2.0389`, misclassifying symptomatic patients such as Cleveland row `292`). A cyan safety banner explains the active route in real time.
 
-### What changes with the language, and what does not
+---
 
-Only **labels** are translated. This distinction is the safety property of the
-whole design:
+## Bilingual Localization (`en` / `fa`) & Multi-Script Digits
 
-| Changes with the language | Never changes |
+- **English (`en`)** and **Persian (`fa`, RTL with Vazirmatn)** toggle live from the top header bar or Lab & Info tab (`appLocaleNotifier` in RAM only — zero disk persistence).
+- Only **display labels** change; internal numeric clinical codes (`cp` `1..4`, `thal` `3/6/7`, `sex` `0/1`, etc.) and Latin telemetry numbers (`5.6%`, `-2.0389`, range hints) remain invariant.
+- `lib/input_parsing.dart` normalizes Persian (`۰-۹`), Arabic-Indic (`٠-٩`), and Latin (`0-9`) digits as well as `.` / `٫` / single `,` decimal separators.
+
+---
+
+## Requirements & Running Tests
+
+| Tool | Verified Version |
 |---|---|
-| field labels, dropdown option text, button text | the numeric **codes** sent to the model (`cp` 1–4, `thal` 3/6/7, `sex` 0/1, ...) |
-| validation messages, risk-band wording, disclaimer | the imputation statistics, scaling, coefficients — i.e. `assets/model.json` |
-| text direction (LTR ⇄ RTL) | the digits used to **display** numbers (always Latin: `55`, `12.5%`) |
+| Flutter | `3.47.9` (`stable`), Dart `3.13.7` |
+| JDK | Eclipse Temurin OpenJDK `21.0.13` (`JAVA_HOME` for Gradle / AGP) |
+| Android SDK | `compileSdk` `36`, `minSdk` `24`, `targetSdk` `36`, `build-tools` `35.0.0` / `36.0.0` |
+| Gradle | `9.3.1` |
 
-So `Typical angina` becomes `آنژین تیپیک` on screen, but the model still
-receives `cp = 1`. A test asserts the code lists directly
-(`localization_test.dart`, "the dropdown values keep the same numeric codes"),
-and the golden-case tests assert that entering the same patient in either
-language produces the same percentage.
-
-### Entering numbers in Persian
-
-A Persian keyboard can produce digits that look familiar but are different
-characters:
-
-```
-Latin         0 1 2 3 4 5 6 7 8 9   U+0030..U+0039
-Persian       ۰ ۱ ۲ ۳ ۴ ۵ ۶ ۷ ۸ ۹   U+06F0..U+06F9
-Arabic-Indic  ٠ ١ ٢ ٣ ٤ ٥ ٦ ٧ ٨ ٩   U+0660..U+0669
-```
-
-`double.tryParse("۱۲")` returns `null`, so without help a Persian user typing
-`۵۵` would see "must be a number". `lib/input_parsing.dart` therefore:
-
-* converts Persian and Arabic-Indic digits to Latin ones,
-* converts the Arabic decimal separator `٫` (U+066B) to `.`,
-* treats a single `,` as the decimal point when there is no `.` (`1,5` → `1.5`),
-* returns `null` for empty or genuinely invalid input.
-
-The `TextField` formatter is set up not to **delete** those digits as you type
-(a Latin-only filter would silently swallow them).
-
-### Adding a third language
-
-1. Add the language code to `kSupportedLocales` in `lib/strings.dart`.
-2. Copy `kEnglishStrings`, translate the values, and keep **every key
-   identical**. Add the new map to `AppStrings.mapFor` (and its font choice in
-   `strings.dart` / the `MaterialApp` builder if the script needs one).
-3. Add the language to the toggle in `HeartRiskApp` in `lib/main.dart`.
-4. Run `flutter test`. The suite fails if any key is missing or has an empty
-   value, which is exactly the mistake that is easy to make.
-
-Because only labels are translated, no change to `lib/heart_model.dart` or
-`assets/model.json` is ever needed to add a language.
-
-### The Persian font
-
-Persian text is rendered with **Vazirmatn** (`assets/fonts/`), an open-source
-font under the SIL Open Font License. Only Regular (400) and Bold (700) are
-bundled; the licence text is next to them in `assets/fonts/OFL.txt`.
-
-It is applied **only when Persian is active** (see the `MaterialApp` `builder`
-in `lib/main.dart`), so the English UI keeps the platform font and looks exactly
-as it did before Persian was added.
-
----
-
-## The formula the app runs
-
-```
-1. numeric (age, trestbps, chol, thalach, oldpeak)
-       missing -> median, then (value - mean) / scale
-2. categorical (sex, cp, fbs, restecg, exang, slope, ca, thal)
-       missing -> mode, then one-hot; an unseen category -> all zeros
-3. z    = intercept + sum(coef[i] * x[i])
-4. prob = 1 / (1 + exp(-z))
-```
-
-That is 5 numeric values + 23 one-hot columns = **28 numbers** into the model.
-`lib/heart_model.dart` implements exactly this, and `verify_formula.py` in
-`../mobile_export/` proves the same recipe matches scikit-learn on all 303 rows
-of the dataset.
-
----
-
-## Requirements
-
-| Tool | Version used here |
-|---|---|
-| Flutter | 3.47.9 (stable), Dart 3.13.7 |
-| JDK | 17 (Microsoft OpenJDK 17.0.13) |
-| Android SDK | platform-36, build-tools 36.0.0, platform-tools |
-| Gradle | 9.3.1 (downloaded automatically by the wrapper) |
-
-Check your setup with:
-
-```bash
-flutter doctor -v
-java -version
-```
-
-The Android toolchain needs `ANDROID_HOME` (or `sdk.dir` in
-`android/local.properties`) pointing at your SDK, and `JAVA_HOME` pointing at a
-JDK 17. On this machine they live in `F:\dev\android-sdk` and `F:\dev\jdk17`,
-which is what `android/local.properties` records.
-
-> Note for this machine only: `dl.google.com` and `repo.maven.apache.org` are
-> intercepted on this network, so the tracked Gradle files deliberately contain
-> **no** mirror URLs — they list the official `google()` / `mavenCentral()`
-> repositories, exactly as a normal checkout does. The mirrors needed to build
-> here are injected from **outside the repository**, by a Gradle init script at
-> `%USERPROFILE%\.gradle\init.d\aliyun-mirrors.gradle`. Nothing in this repo
-> references a mirror, so a normal machine builds unchanged. You can confirm
-> that with:
->
-> ```bash
-> findstr /s /i /n "tencent aliyun" android\*.properties android\*.kts
-> ```
->
-> which prints nothing.
->
-> **If you rebuild on this machine** you will need the mirrors to be visible to
-> the `:app` project, not just to settings: this root project declares its own
-> `repositories { }` block, and Gradle then ignores settings-level repositories
-> for `:app`'s dependencies. The init script alone was therefore not enough when
-> the release APK for this project was built; the two `maven.aliyun.com` lines
-> were temporarily added to `android/build.gradle.kts` and
-> `android/settings.gradle.kts`, the build was run, and both files were restored
-> to the official URLs afterwards. If you need to repeat that, re-add the lines,
-> build, then revert them — the goal is that the committed files stay
-> mirror-free.
-
----
-
-## Run the tests
+Run static analysis and the full automated test suite:
 
 ```bash
 cd android_app
+flutter pub get
+flutter analyze
 flutter test
 ```
 
-Expected output ends with `All tests passed!`. The suite prints how many golden
-cases it checked; all 15 must match scikit-learn within `1e-6`.
-
-Recorded run for this project (`flutter test`, version 1.1.0):
+Latest verified run:
 
 ```
-00:07 +46: All tests passed!
+Analyzing android_app...
+No issues found! (ran in 7.7s)
+
+00:06 +42: All tests passed!
 ```
 
-That is 5 formula tests, 27 number-parsing tests and 19 localization/widget
-tests. `flutter analyze` reports `No issues found!`.
-
-Static analysis:
-
-```bash
-flutter analyze
-```
+Tracked Gradle files (`android/build.gradle.kts`, `android/settings.gradle.kts`) contain **only** official `google()` / `mavenCentral()` repositories — no mirror URLs.
 
 ---
 
-## Build the release APK
+## Release Builds, Split-ABI, R8 & Signing
+
+Release APKs enable R8 code shrinking (`isMinifyEnabled = true`), resource shrinking (`isShrinkResources = true`), Material Icon tree-shaking (`1,645,184 → 4,116 bytes`), and **fail-closed release signing**:
+
+* **Without `android/key.properties`:** `flutter build apk --release` fails intentionally with:
+  `Release build requires android_app/android/key.properties (see android_app/android/SIGNING.md).`
+* **Production signed release:** Generate a local keystore via `android/signing_setup.ps1` (see [`android/SIGNING.md`](android/SIGNING.md)), keeping `key.properties` and `*.jks` out of git, then run:
+  ```bash
+  cd android_app
+  flutter build apk --release --split-per-abi
+  ```
+* **Local debug-signed preview build (sideloading onto your own phone):**
+  ```bash
+  cd android_app
+  flutter build apk --release --split-per-abi --android-project-arg allowDebugRelease=true
+  ```
+
+### Staged `V2.0.0` Split-ABI Preview APKs (Verified Locally)
+
+| ABI | Staged Path | Exact Size | `versionCode` | SHA-256 |
+|---|---|---|---|---|
+| `arm64-v8a` | `../releases/heart-risk-v2.0.0-arm64-v8a.apk` | `17,834,918` bytes (`17.01 MB`) | `2003` | `F36033074EF1364E3CB529FD3696FC3CBD4DB61DE0291094D18FEFE0761B5294` |
+| `armeabi-v7a` | `../releases/heart-risk-v2.0.0-armeabi-v7a.apk` | `15,254,270` bytes (`14.55 MB`) | `1003` | `E496220173E37921D47CDAD2D00EB45DA23AD053EB4BC1B30E9F13E58F9BA4EA` |
+
+Verified `aapt` inspection on both `releases/heart-risk-v2.0.0-*.apk`:
+
+* **Package & Version:** `ir.biovanta.heartrisk`, `versionName='2.0.0'`, `sdkVersion:'24'`, `targetSdkVersion:'36'`
+* **Launcher Labels:** default `Heart Risk`, Persian (`application-label-fa`) `ریسک قلبی`
+* **Merged Permissions (`aapt dump permissions`):** ONLY `ir.biovanta.heartrisk.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` — **zero `android.permission.INTERNET`**
+
+Verify yourself on any built APK:
 
 ```bash
-cd android_app
-flutter build apk --release
+aapt dump permissions releases/heart-risk-v2.0.0-arm64-v8a.apk
 ```
 
-The result is written to:
-
-```
-android_app/build/app/outputs/flutter-apk/app-release.apk
-```
-
-A copy is kept in the repository at `../releases/heart-risk-offline-v1.1.0.apk`.
-
-Recorded from the build performed for this project (version `1.1.0+2`, the
-bilingual release):
-
-```
-√ Built build\app\outputs\flutter-apk\app-release.apk (47.1MB)
-
-size   : 49,361,294 bytes (47.08 MB)
-sha256 : 374e9f55ddd11ed84e2233fac680c94bf46be1ed73cb1b9a39e446937f2387eb
-```
-
-Verified properties of that APK (`aapt dump badging` / `aapt dump permissions`):
-
-| Property | Value |
-|---|---|
-| package | `com.example.heartrisk` |
-| versionName / versionCode | `1.1.0` / `2` |
-| label (default) | `Heart Risk` |
-| label (Persian, `values-fa`) | `ریسک قلبی` |
-| minSdk / targetSdk / compileSdk | 24 / 36 / 36 |
-| permissions | only `com.example.heartrisk.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` (an AndroidX-internal signature permission) — **no INTERNET** |
-| bundled model | `assets/flutter_assets/assets/model.json` (4,210 bytes) |
-| bundled fonts | `assets/flutter_assets/assets/fonts/Vazirmatn-Regular.ttf` (122,752 bytes) and `Vazirmatn-Bold.ttf` (123,036 bytes) |
-
-The release build is signed with the **debug key**, which is fine for
-sideloading onto your own phone but is **not** suitable for publishing to an app
-store.
-
----
-
-## Install it on a phone
-
-1. Copy `releases/heart-risk-offline-v1.1.0.apk` to the phone (USB, or any file
-   transfer you like).
-2. On the phone, allow installing apps from unknown sources for the app you use
-   to open the file.
-3. Tap the APK and install it.
-4. Open **Heart Risk** and tap **Predict** after filling in the 13 values.
-
-The APK is built for the `release` variant, whose manifest contains **no
-INTERNET permission** — so the app cannot use the network even in principle. You
-can verify this on the built APK:
-
-```bash
-# from android_app/, using the build-tools aapt
-aapt dump permissions build/app/outputs/flutter-apk/app-release.apk
-```
-
-The output should list no `android.permission.INTERNET` entry.
-
----
-
-## Run it in development
-
-```bash
-cd android_app
-flutter run            # with a device or emulator connected
-```
-
-Flutter's *debug* and *profile* manifests do declare the INTERNET permission —
-that is how the Flutter tool talks to the running app during development. Those
-manifests are not used by a release build.
-
----
-
-## Privacy
-
-No analytics, no tracking, no data storage, no network calls. The values you
-type are used to compute a number on the device and are never sent anywhere or
-written to disk.
+Note: Debug and profile builds still include Flutter's tooling `INTERNET` permission during development (`flutter run`); release builds strip it completely.

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Outer cyan aura ring inside adaptive icon safe zone -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M54,79 C54,79 27,62 27,44 C27,34.5 34.5,28 42.5,28 C47.8,28 51.8,31.2 54,35.4 C56.2,31.2 60.2,28 65.5,28 C73.5,28 81,34.5 81,44 C81,62 54,79 54,79 Z"
+        android:strokeWidth="6.5"
+        android:strokeAlpha="0.22"
+        android:strokeColor="#39C5CF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- Crisp crimson-coral cardiac silhouette -->
+    <path
+        android:fillColor="#151B26"
+        android:pathData="M54,78 C54,78 28,61.5 28,44 C28,35 35,29 42.5,29 C47.8,29 51.8,32.2 54,36.2 C56.2,32.2 60.2,29 65.5,29 C73,29 80,35 80,44 C80,61.5 54,78 54,78 Z"
+        android:strokeWidth="3.2"
+        android:strokeColor="#FF4D5E"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <!-- BioVanta emerald-cyan pulse trace across cardiac center -->
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M33,51 L43,51 L46.5,46 L50,56 L54,39 L58,61 L61.5,49 L65,51 L75,51"
+        android:strokeWidth="3.2"
+        android:strokeColor="#39C5CF"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+</vector>

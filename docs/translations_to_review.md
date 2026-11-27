@@ -1,7 +1,7 @@
 # Persian translations to review
 
 This file lists the Persian text added to the Android app
-(`android_app/lib/strings.dart`).
+(`android_app/lib/l10n/strings.dart`).
 
 It has two parts:
 
@@ -123,6 +123,25 @@ install the user never sees these.
 `{error}` is the raw Dart exception text. It stays in English because it is a
 technical diagnostic, not user-facing prose.
 
+### 2f. V2.0.0 Additions (Dual-Mode Auto-Routing, Explainability & Lab Card)
+
+Added in **BIOVANTA · HEART V2.0.0** inside `android_app/lib/l10n/strings.dart`:
+
+| Key | English | Persian | Where it appears |
+|---|---|---|---|
+| `navAssess` / `navExplain` / `navLabInfo` | Assess / Explain / Lab & Info | ارزیابی / تحلیل Δz / کارت مدل | Bottom glass navigation dock |
+| `themeTooltip` / `languageTooltip` | Switch Obsidian Dark / Clinical Paper; Switch English / فارسی | تغییر تم تاریک / کاغذ بالینی؛ تغییر زبان فارسی / English | Header bar tooltips |
+| `modeFull13` / `modeNonInvasive11` | Full Clinical · 13 / Non-Invasive · 11 | بالینی کامل · 13 / غیرتهاجمی · 11 | Inference mode selector |
+| `unknownOption` | Not tested / Unknown | آزمایش نشده / نامشخص | `ca` and `thal` dropdown unknown option |
+| `autoRouteBanner` | Clinical safety auto-routing active: ca or thal is marked "Not tested / Unknown", so inference automatically switched to non_invasive_11 instead of assuming healthy defaults (ca=0, thal=3), which would shift log-odds by -2.0389. | مسیریابی ایمن خودکار فعال شد: به دلیل نامشخص بودن ca یا thal، محاسبه با مدل ۱۱ ویژگی non_invasive_11 انجام شد و مقادیر نامشخص هرگز با مقادیر سالم (ca=0, thal=3) پر نمی‌شوند (-2.0389 log-odds). | Assess tab safety callout |
+| `nonInvasiveOmitted` | Non-Invasive Screening mode excludes fluoroscopy (ca) and thallium scan (thal). | در حالت غربالگری غیرتهاجمی، آزمایش‌های فلوروسکوپی (ca) و اسکن تالیوم (thal) لحاظ نمی‌شوند. | Specialized tests card note |
+| `presetsHeading` / `presetsHint` | Clinical Presets / Tap any patient profile to populate inputs live | نمونه‌های بالینی آماده / برای پر کردن سریع مقادیر، یکی از پروفایل‌ها را لمس کنید | Horizontal preset deck |
+| `explainTitle` / `equationTitle` / `contributionsTitle` | Additive Log-Odds Explainability / Exact Logistic Equation / Per-Feature Contributions (Δz) | توضیح‌پذیری دقیق لگاریتم شانس / معادله‌ی دقیق لجستیک / سهم هر ویژگی (Δz) | Explain tab |
+| `whatIfTitle` / `whatIfInvasiveToggle` / `whatIfReset` | What-If Sensitivity Explorer / Mask ca & thal as Unknown (route to non_invasive_11) / Reset sliders | کاوشگر حساسیت «چه می‌شود اگر» / نامشخص کردن ca و thal (مسیر non_invasive_11) / بازنشانی اسلایدرها | What-If explorer |
+| `caveatTitle` | Understanding counter-intuitive weights (age, fbs, cp=4) | توضیح ضرایب هم‌خطی و سوگیری ارجاع (age، fbs، cp=4) | Collinearity expansion tile |
+| `labInternalTitle` / `labExternalTitle` / `labOfflineTitle` | Internal Cleveland Validation (N=303) / Zero-Retraining UCI External Validation / Verified Offline Privacy | اعتبارسنجی داخلی کلیولند (N=303) / اعتبارسنجی خارجی UCI بدون بازآموزی / حریم خصوصی و آفلاین بودن | Lab & Info tab |
+| `cohortHungarian` / `cohortSwitzerland` / `cohortVa` / `cohortPooled` | Hungarian / Switzerland / VA Long Beach / Pooled External | مجارستان / سوئیس / لانگ‌بیچ VA / تجمیع خارجی | External validation cards |
+
 ---
 
 ## 3. Choices worth a second look
@@ -145,7 +164,7 @@ affects the model — only wording and appearance.
 
 ## 4. How to change any of this
 
-Every string lives in one file: `android_app/lib/strings.dart`, in the
+Every string lives in one file: `android_app/lib/l10n/strings.dart`, in the
 `kEnglishStrings` and `kPersianStrings` maps. Edit the Persian value, keep the
 key unchanged, and run:
 

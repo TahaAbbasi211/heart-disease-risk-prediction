@@ -1,4 +1,4 @@
-package com.example.heartrisk
+package ir.biovanta.heartrisk
 
 import io.flutter.embedding.android.FlutterActivity
 

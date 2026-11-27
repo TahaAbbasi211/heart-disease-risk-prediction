@@ -14,3 +14,9 @@ android_app/android/.gradle/
 
 # Built APK artifacts (sideloading output, not source).
 *.apk
+
+# Android signing secrets & local keystores (never commit).
+android_app/android/key.properties
+android_app/android/*.jks
+android_app/android/*.keystore
+android_app/android/lineage.bin

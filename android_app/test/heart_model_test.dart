@@ -1,29 +1,20 @@
 // heart_model_test.dart
 //
-// These tests prove that the Dart formula in the app produces exactly the
-// same probabilities as the Python/scikit-learn model.
-//
-// test/golden_cases.json is a copy of mobile_export/golden_cases.json: it holds
-// 15 input rows (including rows with missing ca/thal and one unseen category)
-// together with the probability scikit-learn computed for each of them.
-//
-// Run with:  flutter test
+// Proves exact parity between Dart HeartModel v2, Python heart_risk/engine.py,
+// scikit-learn golden cases v2 (< 1e-12), clinical auto-routing safety, and validation.
 
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:heart_risk_offline/heart_model.dart';
+import 'package:heart_risk_offline/presets.dart';
 
 void main() {
-  // The exported model, read from the same asset file the app ships.
   late HeartModel model;
-  // The expected probabilities produced by the Python pipeline.
   late Map<String, dynamic> golden;
 
   setUpAll(() {
-    // In a Dart test the asset bundle is not available, so we read the files
-    // straight from disk instead.
     model = HeartModel.fromJsonString(
       File('assets/model.json').readAsStringSync(),
     );
@@ -31,93 +22,225 @@ void main() {
         as Map<String, dynamic>;
   });
 
-  /// Turn one JSON row into the Map<String, double?> the model expects.
-  /// A JSON null means "missing" and must stay null so it gets imputed.
   Map<String, double?> inputOf(Map<String, dynamic> c) {
     final raw = c['input'] as Map<String, dynamic>;
-    return {
+    return <String, double?>{
       for (final entry in raw.entries)
         entry.key:
             entry.value == null ? null : (entry.value as num).toDouble(),
     };
   }
 
-  test('the exported formula has one coefficient per output feature', () {
-    final spec = jsonDecode(File('assets/model.json').readAsStringSync())
-        as Map<String, dynamic>;
-    final outputFeatures = spec['output_features'] as List;
-    final oneHotWidth = model.categoricalCols
-        .fold<int>(0, (s, c) => s + model.categorical[c]!.categories.length);
-
-    expect(model.coef.length, outputFeatures.length);
-    expect(model.coef.length, model.numericCols.length + oneHotWidth);
-    expect(model.coef.length, 28);
+  test('assets/model.json and test/golden_cases.json match mobile_export byte-for-byte', () {
+    expect(
+      File('assets/model.json').readAsBytesSync(),
+      orderedEquals(File('../mobile_export/model.json').readAsBytesSync()),
+    );
+    expect(
+      File('test/golden_cases.json').readAsBytesSync(),
+      orderedEquals(File('../mobile_export/golden_cases.json').readAsBytesSync()),
+    );
   });
 
-  test('golden cases match scikit-learn within 1e-6', () {
-    final tolerance = (golden['tolerance'] as num).toDouble();
-    final cases = golden['cases'] as List;
+  test('schema v2 exposes full_13 (28), non_invasive_11 (21), risk_bands & external validation', () {
+    expect(model.schemaVersion, 2);
+    expect(model.format, kExpectedFormat);
+    expect(model.lowMax, 0.35);
+    expect(model.moderateMax, 0.65);
 
-    expect(cases.length, greaterThanOrEqualTo(15));
+    expect(model.full13.nInputFeatures, 13);
+    expect(model.full13.coef.length, 28);
+    expect(model.full13.outputFeatures.length, 28);
+    expect(model.full13.metadata?.sklearnVersion, '1.6.1');
 
-    var checked = 0;
+    expect(model.nonInvasive11.nInputFeatures, 11);
+    expect(model.nonInvasive11.coef.length, 21);
+    expect(model.nonInvasive11.outputFeatures.length, 21);
+    expect(model.nonInvasive11.categoricalCols.contains('ca'), isFalse);
+    expect(model.nonInvasive11.categoricalCols.contains('thal'), isFalse);
+    expect(model.nonInvasive11.metadata?.sklearnVersion, '1.6.1');
+
+    expect(model.externalValidation, isNotNull);
+    expect(
+      model.externalValidation!.cohorts.keys,
+      containsAll(<String>['hungarian', 'switzerland', 'va', 'pooled_external']),
+    );
+  });
+
+  test('all 27 golden cases match probability, z, intercept, and deltaZ within 1e-12', () {
+    expect(golden['schema_version'], 2);
+    expect(golden['format'], 'heart-risk-golden-cases/2');
+    final cases = golden['cases'] as List<dynamic>;
+    expect(cases.length, 27);
+
+    final modesSeen = <String>{};
     for (final item in cases) {
       final c = item as Map<String, dynamic>;
       final name = c['name'] as String;
-      final expected = (c['probability'] as num).toDouble();
-      final actual = model.predictProbability(inputOf(c));
-      final diff = (actual - expected).abs();
+      final mode = c['mode'] as String;
+      modesSeen.add(mode);
 
-      // `reason` shows up in the failure message, which makes a broken case
-      // easy to identify.
+      final res = model.predict(inputOf(c), mode: mode, validate: false);
+      final expProb = (c['probability'] as num).toDouble();
+      final expZ = (c['z'] as num).toDouble();
+      final expIntercept = (c['intercept'] as num).toDouble();
+      final expContrib = c['contributions'] as Map<String, dynamic>;
+
+      expect((res.probability - expProb).abs(), lessThan(1e-12), reason: name);
+      expect((res.z - expZ).abs(), lessThan(1e-12), reason: name);
+      expect((res.intercept - expIntercept).abs(), lessThan(1e-12), reason: name);
+
+      var reconstructedZ = res.intercept;
+      for (final fc in res.contributions) {
+        reconstructedZ += fc.deltaZ;
+      }
+      expect((reconstructedZ - res.z).abs(), lessThan(1e-12), reason: name);
+
+      final actualMap = res.contributionMap();
+      expect(actualMap.keys.toSet(), equals(expContrib.keys.toSet()), reason: name);
+      for (final entry in expContrib.entries) {
+        final diff = (actualMap[entry.key]! - (entry.value as num).toDouble()).abs();
+        expect(diff, lessThan(1e-12), reason: '$name:${entry.key}');
+      }
+    }
+    expect(modesSeen, equals(<String>{kModeFull13, kModeNonInvasive11}));
+  });
+
+  test('auto-routing prevents healthy-mode false-reassurance trap (including row 292)', () {
+    final fullRes = model.predict(kDefaultInputs, mode: kModeAuto);
+    expect(fullRes.mode, kModeFull13);
+    expect(fullRes.probability, closeTo(0.0561, 1e-3));
+
+    expect(
+      model.predict({...kDefaultInputs, 'ca': null}, mode: kModeAuto).mode,
+      kModeNonInvasive11,
+    );
+    expect(
+      model.predict({...kDefaultInputs, 'thal': null}, mode: kModeAuto).mode,
+      kModeNonInvasive11,
+    );
+
+    // Real positive Cleveland row 292: missing ca/thal keeps high risk (71.4%)
+    // via auto-routing, whereas naive mode-imputation drops below 50% (44.5%).
+    const row292Masked = <String, double?>{
+      'age': 44,
+      'sex': 1,
+      'cp': 4,
+      'trestbps': 120,
+      'chol': 169,
+      'fbs': 0,
+      'restecg': 0,
+      'thalach': 144,
+      'exang': 1,
+      'oldpeak': 2.8,
+      'slope': 3,
+      'ca': null,
+      'thal': null,
+    };
+    final safeRes = model.predict(row292Masked, mode: kModeAuto);
+    final naiveRes = model.predict(row292Masked, mode: kModeFull13);
+    expect(safeRes.mode, kModeNonInvasive11);
+    expect(safeRes.riskBand, RiskBand.high);
+    expect(safeRes.predClass, 1);
+    expect(naiveRes.predClass, 0);
+    expect(naiveRes.imputedCols, equals(<String>['ca', 'thal']));
+  });
+
+  test('validate:true rejects NaN, Infinity, out-of-bounds, and invalid categoricals', () {
+    final invalidPatches = <Map<String, double?>>[
+      {'age': double.nan},
+      {'age': double.infinity},
+      {'oldpeak': double.negativeInfinity},
+      {'age': 19},
+      {'age': 101},
+      {'trestbps': 79},
+      {'trestbps': 221},
+      {'chol': 99},
+      {'chol': 601},
+      {'thalach': 59},
+      {'thalach': 221},
+      {'oldpeak': -0.1},
+      {'oldpeak': 7.1},
+      {'ca': 99},
+      {'thal': 5},
+      {'ca': 99, 'thal': null},
+      {'ca': null, 'thal': 5},
+      {'cp': 9},
+      {'sex': 2},
+      {'slope': 9},
+    ];
+
+    for (final patch in invalidPatches) {
       expect(
-        diff,
-        lessThan(tolerance),
-        reason: '$name: Dart=$actual, sklearn=$expected, |diff|=$diff',
+        () => model.predict({...kDefaultInputs, ...patch}, mode: kModeAuto),
+        throwsA(isA<HeartValidationException>()),
+        reason: 'Expected HeartValidationException for $patch',
       );
-      checked++;
     }
-    // ignore: avoid_print
-    print('checked $checked golden cases, all within $tolerance');
+
+    expect(
+      () => model.predict({...kDefaultInputs, 'cp': 9}, mode: kModeNonInvasive11),
+      throwsA(isA<HeartValidationException>()),
+    );
   });
 
-  test('probabilities stay inside [0, 1]', () {
-    final cases = golden['cases'] as List;
-    for (final item in cases) {
-      final p = model.predictProbability(inputOf(item as Map<String, dynamic>));
-      expect(p, greaterThanOrEqualTo(0.0));
-      expect(p, lessThanOrEqualTo(1.0));
+  test('validate:false supports unseen category parity with sklearn handle_unknown=ignore', () {
+    final resFull = model.predict(
+      {...kDefaultInputs, 'thal': 5.0},
+      mode: kModeFull13,
+      validate: false,
+    );
+    expect(resFull.unseenCols, equals(<String>['thal']));
+    expect(resFull.contributionMap()['thal'], 0.0);
+
+    final resNi = model.predict(
+      {...kDefaultInputs, 'cp': 9.0, 'ca': null, 'thal': null},
+      mode: kModeAuto,
+      validate: false,
+    );
+    expect(resNi.mode, kModeNonInvasive11);
+    expect(resNi.unseenCols, equals(<String>['cp']));
+    expect(resNi.contributionMap()['cp'], 0.0);
+  });
+
+  test('risk_bands thresholds are read from JSON and validated', () {
+    final raw = jsonDecode(File('assets/model.json').readAsStringSync())
+        as Map<String, dynamic>;
+    raw['risk_bands'] = <String, dynamic>{
+      'low_max': 0.04,
+      'moderate_max': 0.05,
+    };
+    final strictModel = HeartModel.fromJson(raw);
+    expect(
+      strictModel.predict(kDefaultInputs, mode: kModeAuto).riskBand,
+      RiskBand.high,
+    );
+
+    raw['risk_bands'] = <String, dynamic>{
+      'low_max': 0.70,
+      'moderate_max': 0.50,
+    };
+    expect(
+      () => HeartModel.fromJson(raw),
+      throwsA(isA<HeartValidationException>()),
+    );
+  });
+
+  test('stableSigmoid handles extreme z without overflow and rejects non-finite', () {
+    expect(stableSigmoid(-1000.0), 0.0);
+    expect(stableSigmoid(1000.0), 1.0);
+    expect(stableSigmoid(0.0), 0.5);
+    expect(stableSigmoid(-12.5), closeTo(1.0 - stableSigmoid(12.5), 1e-12));
+    expect(() => stableSigmoid(double.nan), throwsA(isA<HeartValidationException>()));
+    expect(() => stableSigmoid(double.infinity), throwsA(isA<HeartValidationException>()));
+  });
+
+  test('canonical defaults and all 4 presets match expected modes and risk bands', () {
+    expect(kDefaultInputs['sex'], 1.0);
+    for (final preset in kClinicalPresets) {
+      final res = model.predict(preset.inputs, mode: kModeAuto);
+      expect(res.mode, preset.expectedMode, reason: preset.id);
+      expect(res.riskBand, preset.expectedBand, reason: preset.id);
     }
-  });
-
-  test('a missing value falls back to the imputer statistic', () {
-    // Passing null for ca/thal must give the same answer as passing the
-    // exported mode, because that is what the imputer does.
-    final base = <String, double?>{
-      'age': 53, 'sex': 0, 'cp': 3, 'trestbps': 128, 'chol': 216, 'fbs': 0,
-      'restecg': 2, 'thalach': 115, 'exang': 0, 'oldpeak': 0, 'slope': 1,
-    };
-    final withNull = model.predictProbability(
-        {...base, 'ca': null, 'thal': null});
-    final withMode = model.predictProbability({
-      ...base,
-      'ca': model.categorical['ca']!.mode,
-      'thal': model.categorical['thal']!.mode,
-    });
-    expect((withNull - withMode).abs(), lessThan(1e-12));
-  });
-
-  test('an unseen category matches no one-hot column', () {
-    // thal=5 never appears in the training data, so its one-hot block must be
-    // all zeros -- the same thing OneHotEncoder(handle_unknown="ignore") does.
-    final input = <String, double?>{
-      'age': 63, 'sex': 1, 'cp': 1, 'trestbps': 145, 'chol': 233, 'fbs': 1,
-      'restecg': 2, 'thalach': 150, 'exang': 0, 'oldpeak': 2.3, 'slope': 3,
-      'ca': 0, 'thal': 5,
-    };
-    final x = model.buildFeatureVector(input);
-    // The last three entries are the thal one-hot columns (3, 6, 7).
-    expect(x.sublist(x.length - 3), [0.0, 0.0, 0.0]);
-    expect(model.predictProbability(input), closeTo(0.209344875521012, 1e-6));
   });
 }
