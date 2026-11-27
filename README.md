@@ -1,78 +1,119 @@
 # Heart Disease Risk Prediction
 
-End-to-end machine learning project on the UCI Cleveland heart disease dataset: exploratory analysis, leakage-free preprocessing, model comparison with cross-validation, hyperparameter tuning, explainability (SHAP), and a Streamlit app.
+End-to-end machine learning project on the UCI Heart Disease datasets: exploratory analysis, leakage-free dual-mode preprocessing, repeated cross-validation and calibration evaluation, zero-retraining external validation across three independent UCI hospital cohorts, a pure-Python runtime inference/explainability package (`heart_risk/`), and a bilingual (English / فارسی) Streamlit app backed by a single-source-of-truth JSON formula (`mobile_export/model.json` v2).
+
+> **Research & educational prototype. Not a medical diagnostic device.**
+
+---
+
+## Architecture: Single Source of Truth (`model.json` v2)
+
+Previously, the Streamlit app loaded a pickled `RandomForestClassifier` (`model.pkl`) while mobile/formula consumers used `LogisticRegression` (`model.json` v1), creating a **Split-Brain discrepancy** (`49/303` risk-band flips across Cleveland; `0.0561` vs `0.1769` on the canonical default male patient) and a **mode-imputation false-reassurance trap** where missing invasive tests (`ca`, `thal`) silently defaulted to healthy modes (`ca=0, thal=3`, shifting log-odds by `-2.0389`).
+
+In **v2**:
+- **`mobile_export/model.json`** (`heart-risk-linear-formula/2`) is the **sole production artifact**; legacy `model.pkl` has been retired from runtime (`RandomForest` remains documented in `notebooks/` as a comparison benchmark only).
+- **Dual-mode inference & clinical auto-routing (`heart_risk/`):**
+  - `full_13`: 13 clinical features (`5` numeric + `8` categorical, `28` encoded features, `C = 1.0`).
+  - `non_invasive_11`: 11 non-invasive / standard-workup features (`5` numeric + `6` categorical, `21` encoded features, `C = 0.1`, excluding `ca` and `thal`).
+  - Under `mode="auto"`, whenever `ca` or `thal` is missing (`None`), `heart_risk` automatically routes to `non_invasive_11` instead of silently imputing healthy defaults—raising held-out test positive recall under missing invasive tests from `0.5714` (naive mode-imputed `full_13`) to `0.8571` (`non_invasive_11`).
+- **Zero-ML Streamlit runtime:** `app.py` uses only `streamlit` and `heart_risk/` (standard library + `model.json` v2), with exact additive per-feature `Δz` explainability and bilingual EN / فارسی support.
+- **Android app note:** `android_app/` currently runs `model.json` v1 and will be upgraded to **V2.0.0** (dual-mode `model.json` v2 + explainability + presets) in Phase 2.
+
+---
 
 ## Dataset
 
-- UCI Heart Disease dataset, Cleveland subset: 303 patients, 13 features.
-- The original target (0–4) is binarized: `1` = heart disease present, `0` = absent (164 vs 139 patients, roughly balanced).
-- 6 missing values (`ca`: 4, `thal`: 2), imputed inside the pipeline. No duplicates, no physiologically impossible values.
+- **Training & Internal Validation:** UCI Heart Disease dataset, Cleveland subset (`N = 303`, `139` positives = `45.9%`, `164` negatives). `6` missing values (`ca`: 4, `thal`: 2). Stratified 80/20 split (`train = 242`, `test = 61`, `random_state = 42`) applied *before* fitting any imputer, scaler, encoder, or model.
+- **Zero-Retraining External Validation:** UCI Hungarian (`N = 294`, `36.1%` positive), UCI Switzerland (`N = 123`, `93.5%` positive), and UCI VA Long Beach (`N = 200`, `74.5%` positive), cached by `scripts/evaluate_heart.py` in `data/external/`.
 - Source: UCI Machine Learning Repository (Heart Disease). Please credit the original authors if you reuse the data.
 
-## Method
-
-1. **EDA** – class balance, distributions by target, correlation, outliers, effect sizes (Cohen's d, Welch t-test).
-2. **Preprocessing** – stratified 80/20 split *before* any fitting; median/most-frequent imputation, standardization, one-hot encoding, all inside a scikit-learn `Pipeline` (no data leakage).
-3. **Models** – Logistic Regression, KNN, SVM, Decision Tree, Random Forest, Gradient Boosting, plus a Dummy baseline, compared with stratified 5-fold CV on the training set.
-4. **Tuning** – `GridSearchCV` (ROC-AUC) for Logistic Regression, SVM and Random Forest.
-5. **Final check** – one evaluation on the untouched test set.
-6. **Explainability** – permutation importance and SHAP.
+---
 
 ## Results
 
-Cross-validated ROC-AUC (5 folds, training set):
+### 1. Training Hyperparameter Selection (`X_train`, `N = 242`, 5-Fold Stratified CV)
 
-| Model | AUC |
-|---|---|
-| Logistic Regression | 0.902 |
-| Random Forest | 0.894 |
-| SVM | 0.888 |
-| KNN | 0.872 |
-| Gradient Boosting | 0.857 |
-| Decision Tree | 0.786 |
-| Dummy baseline | 0.500 |
+| Model / Mode | Input Features | Output Features | Selected `C` | 5-Fold Train CV ROC-AUC |
+|---|---|---|---|---|
+| Logistic Regression (`full_13`) | 13 | 28 | `1.0` | `0.902` (`0.9025 ± 0.0144`) |
+| Logistic Regression (`non_invasive_11`) | 11 | 21 | `0.1` | `0.860` (`0.8602 ± 0.0402`) |
 
-The top three models are within one standard deviation of each other, so the data cannot rank them reliably. Tuning improved AUC by at most ~0.01 (Random Forest 0.894 → 0.904), which is within noise: the models are not very sensitive to hyperparameters.
+In `notebooks/03_modeling.ipynb` (5-fold train CV on the full 13 features), untuned baselines ranked: Logistic Regression (`0.902`), Random Forest (`0.894`), SVM (`0.888`), KNN (`0.872`), Gradient Boosting (`0.857`), Decision Tree (`0.786`), Dummy baseline (`0.500`), with tuned Random Forest reaching `0.904`—within one standard deviation of Logistic Regression (`0.902`).
 
-Final model: Random Forest. On the held-out test set (61 patients): AUC 0.955, recall 0.893, precision 0.806 (TN 27, FP 6, FN 3, TP 25). With only 28 positive cases this estimate is noisy and likely optimistic; the cross-validated AUC (~0.90) is the more trustworthy number.
+### 2. Internal Cleveland Validation (`10×5 Repeated Stratified CV`, `N = 303`, 50 Folds)
 
-## What the model learned
+All preprocessing (`SimpleImputer`, `StandardScaler`, `OneHotEncoder`) is refit inside every fold. Intervals below show the **95% fold range (2.5–97.5% across 50 folds)**:
 
-Most influential features: `ca`, `cp`, `thal`, `exang`, `oldpeak`. Directions are clinically plausible (higher max heart rate and no major vessels colored lower the risk; ST depression, exercise-induced angina, reversible thallium defect and age raise it). Cholesterol and fasting blood sugar have almost no effect, consistent with the EDA.
+| Model | ROC-AUC (95% fold range) | PR-AUC (95% fold range) | Brier (95% fold range) | 10-Bin ECE (95% fold range) | Log-Loss (95% fold range) |
+|---|---|---|---|---|---|
+| Logistic Regression (`full_13`, `C=1.0`) | `0.914 ± 0.032` `[0.847, 0.964]` | `0.913 ± 0.034` `[0.852, 0.966]` | `0.115 ± 0.024` `[0.076, 0.160]` | `0.113 ± 0.022` `[0.071, 0.152]` | `0.373 ± 0.067` `[0.260, 0.504]` |
+| Random Forest (`full_13`, notebook benchmark) | `0.912 ± 0.034` `[0.837, 0.965]` | `0.909 ± 0.037` `[0.835, 0.962]` | `0.123 ± 0.018` `[0.097, 0.162]` | `0.124 ± 0.028` `[0.074, 0.181]` | `0.395 ± 0.044` `[0.330, 0.493]` |
+| Logistic Regression (`non_invasive_11`, `C=0.1`) | `0.879 ± 0.035` `[0.815, 0.940]` | `0.873 ± 0.039` `[0.800, 0.933]` | `0.143 ± 0.019` `[0.113, 0.173]` | `0.119 ± 0.023` `[0.079, 0.158]` | `0.444 ± 0.046` `[0.367, 0.515]` |
 
-Notably, asymptomatic chest pain (`cp=4`) *raises* predicted risk. This is a known pattern in this dataset and probably reflects that patients were referred for angiography.
-## Offline Android app
+**Nested `10×5` CV Verification** (re-tuning `C` via inner 5-fold CV inside every outer fold): `full_13` ROC-AUC = `0.912 ± 0.033` (vs fixed `C=1.0`: `0.914 ± 0.032`, choosing `C=0.1` in `28/50` and `C=1.0` in `22/50` folds); `non_invasive_11` ROC-AUC = `0.875 ± 0.037` (vs fixed `C=0.1`: `0.879 ± 0.035`, choosing `C=0.1` in `32/50`, `C=1.0` in `17/50`, `C=0.01` in `1/50` folds).
 
-An installable Android app (English / Persian) runs the model fully on the phone, with no server and no internet permission. Download the APK from the [Releases](https://github.com/TahaAbbasi211/heart-disease-risk-prediction/releases) page (debug-signed, for personal sideloading only).
+On the untouched held-out test set (`N = 61`, `28` positive):
+- **Logistic Regression (`full_13`):** ROC-AUC `0.9665`, PR-AUC `0.9634`, Brier `0.0797`, 10-bin ECE `0.0825`, Log-Loss `0.2595`, recall `0.9286`, precision `0.8387` (`TN 28, FP 5, FN 2, TP 26`).
+- **Logistic Regression (`non_invasive_11`):** ROC-AUC `0.9589`, PR-AUC `0.9462`, Brier `0.1036`, 10-bin ECE `0.1632`, Log-Loss `0.3548`, recall `0.8571`, precision `0.8889` (`TN 30, FP 3, FN 4, TP 24`).
+- **Random Forest (`full_13` notebook benchmark):** ROC-AUC `0.9545`, recall `0.8929`, precision `0.8065` (`TN 27, FP 6, FN 3, TP 25`).
 
-The app uses the **Logistic Regression** model, re-implemented as a plain formula (28 coefficients plus the preprocessing constants, stored in `model.json`). It is used instead of the Random Forest because it has a simple closed form and its cross-validated AUC (0.903) is statistically indistinguishable from the Random Forest (0.904). The Streamlit app still uses the Random Forest, so the two apps can give slightly different probabilities.
+### 3. Zero-Retraining External Validation (`non_invasive_11`)
 
-Correctness: the formula matches scikit-learn's `predict_proba` to within 3e-16 on all 303 rows, and the Dart code is tested against 15 reference cases (tolerance 1e-6). The app UI was tested manually on a phone.
+Cleveland-trained `non_invasive_11` (`C=0.1`) was evaluated directly without retraining on three independent UCI hospitals. Because Switzerland (`123/123` = `100%`) and VA Long Beach (`49/200` = `24.5%` cholesterol, `1/200` = `0.5%` blood pressure) encode missing vitals as `0`, both raw (`? -> NaN` only) and cleaned (`chol/trestbps == 0 -> NaN`, imputed to Cleveland medians `244.5` and `130.0`) metrics are reported:
 
-Code: `mobile_export/` (formula export and verification), `android_app/` (Flutter).
+| Cohort | N (Prevalence) | Raw ROC-AUC | Raw ECE | Cleaned ROC-AUC | Cleaned ECE | Mean Pred vs True Prev |
+|---|---|---|---|---|---|---|
+| UCI Hungarian | 294 (`36.1%`) | `0.8913` | `0.0793` | `0.8913` | `0.0793` | `0.410` vs `0.361` |
+| UCI Switzerland | 123 (`93.5%`) | `0.7620` | `0.4347` | `0.7620` | `0.3044` | `0.632` vs `0.935` |
+| UCI VA Long Beach | 200 (`74.5%`) | `0.7284` | `0.1585` | `0.7442` | `0.1243` | `0.621` vs `0.745` |
+| Pooled External | 617 (`60.0%`) | `0.8302` | `0.1145` | `0.8649` | `0.0914` | `0.522` vs `0.600` |
 
-## Limitations
+While ranking performance (`ROC-AUC`) generalizes well to Hungarian (`0.8913`) and improves on pooled data (`0.8649`) after fixing impossible `chol/trestbps == 0` entries, calibration degrades across high-prevalence cohorts (`93.5%` Switzerland, `74.5%` VA Long Beach) because Cleveland's `45.9%` baseline intercept under-predicts risk without local recalibration. Full breakdowns and 10-bin reliability tables live in [docs/heart_v2_evaluation_report.md](docs/heart_v2_evaluation_report.md) and [docs/evaluation_metrics.json](docs/evaluation_metrics.json).
 
-- Small dataset (303 patients); results vary between splits.
-- Several inputs (`ca`, `thal`) come from invasive or specialized tests, so this is not usable by the general public.
-- SHAP and importances show associations, not causation.
-- Single-center data; no external validation.
+---
 
-## Run it
+## What the Model Learned (Collinearity & Referral Bias)
+
+- **Main drivers (`full_13`):** `ca` (`ca=0`: `-1.4986`, `ca=2`: `+0.6422`), `cp` (`cp=4`: `+1.0306`), `thal` (`thal=7`: `+0.8185`, `thal=3`: `-0.5402`), `sex`, `slope`, `thalach` (`-0.3725`), `trestbps` (`+0.3406`), and `oldpeak` (`+0.2595`).
+- **Why `num__age` is `-0.0609` in `full_13`:** Univariately in Cleveland, older age *raises* risk (`Pearson r = +0.2231`, `p = 8.96e-05`; univariate standardized `LogReg` coef `+0.4301`). However, age shares strong collinearity with `ca` (`r = +0.363`), reduced `thalach` (`r = -0.394`), `trestbps` (`r = +0.285`), and `oldpeak` (`r = +0.204`). Once all of those clinical markers are conditioned on simultaneously in `N=242` training rows, the residual partial slope on age flips slightly negative (`-0.0609` in `full_13`; `+0.1344` in `non_invasive_11`).
+- **Why `cat__fbs_1.0` is `-0.1033`:** Only `45/303` patients had fasting blood sugar `> 120 mg/dl`, with nearly identical disease prevalence (`48.9%` vs `45.3%`, Fisher `p = 0.746`); the tiny weight is sampling noise.
+- **Angiography referral bias (`cp = 4`):** Asymptomatic chest pain (`cp = 4`) carries `72.9%` disease prevalence (`105/144`) and `+1.0306` weight in Cleveland because asymptomatic catheterization patients were referred due to silent ischemia or abnormal stress tests, not because absence of pain causes disease.
+
+---
+
+## Run & Verify
+
+### Runtime app only (lightweight — zero ML libraries)
 
 ```bash
 pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Project structure
+### Full evaluation, export, parity checks, and test suite
 
+```bash
+pip install -r requirements-dev.txt
+python scripts/evaluate_heart.py
+python mobile_export/export_model.py
+python mobile_export/verify_formula.py
+pytest -v
 ```
-data/           dataset (raw + cleaned)
-notebooks/      EDA, preprocessing, modeling
-model.pkl       trained scikit-learn pipeline
-app.py          Streamlit app
-mobile_export/  formula export + verification
-android_app/    offline Flutter app
-requirements.txt
+
+---
+
+## Project Structure
+
+```text
+heart_risk/              Pure-Python dual-mode inference, presets, and Δz engine
+app.py                   Bilingual (EN / فارسی) Streamlit app powered by heart_risk
+scripts/evaluate_heart.py  10x5 CV, calibration, split-brain, collinearity & UCI validation
+mobile_export/           Dual-mode model.json v2, golden_cases.json v2, export & verify
+tests/                   Parity, clinical safety, import-isolation & Streamlit AppTest suite
+docs/                    Evaluation report, metrics JSON, and translation docs
+notebooks/               EDA, preprocessing, modeling notebooks & shared common.py
+data/                    Cleveland heart.csv (external UCI cohorts cached in data/external/)
+android_app/             Offline Flutter app (to be upgraded to V2.0.0 in Phase 2)
+requirements.txt         Lightweight Streamlit runtime dependencies
+requirements-dev.txt     Full ML research, validation, and pytest dependencies
 ```

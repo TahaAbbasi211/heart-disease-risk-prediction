@@ -1,0 +1,36 @@
+name: Python CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  verify-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install -r requirements-dev.txt
+
+      - name: Verify zero-ML runtime import isolation
+        run: |
+          python -c "import sys; from heart_risk import DEFAULT_INPUTS, predict; res = predict(DEFAULT_INPUTS); bad = [m for m in ('sklearn', 'joblib', 'shap', 'matplotlib', 'seaborn', 'scipy', 'numpy', 'pandas') if any(k == m or k.startswith(m + '.') for k in sys.modules)]; assert not bad, bad; print('Runtime isolation OK:', round(res.probability, 6))"
+
+      - name: Verify dual-mode formula parity against sklearn
+        run: python mobile_export/verify_formula.py
+
+      - name: Run pytest suite
+        run: pytest -v

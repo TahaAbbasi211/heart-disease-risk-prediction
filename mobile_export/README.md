@@ -1,146 +1,62 @@
-# mobile_export — the model as a plain formula
+# mobile_export — Dual-Mode Plain-Formula Export (`v2`)
 
-This folder turns the project's Logistic Regression into a **plain mathematical
-formula** that can be re-implemented on a phone without any machine-learning
-library.
-
-The phone app does not ship scikit-learn, NumPy or a `.pkl` file. It ships
-`model.json` — a few hundred numbers — and ~40 lines of Dart that do the
-arithmetic by hand.
+This folder exports the project's **two Logistic Regression models** into a single self-contained arithmetic specification (`model.json`, schema `heart-risk-linear-formula/2`) so web and mobile clients execute identical predictions without scikit-learn, NumPy, or `.pkl` files.
 
 ---
 
-## 1. Why a formula is possible
+## 1. Dual-Mode Specification (`schema_version: 2`)
 
-A `LogisticRegression` is a *linear* model. Its whole prediction is:
+1. **`models.full_13`** (`C = 1.0`, `13` input features -> `28` encoded features):
+   Uses all `5` numeric features (`age`, `trestbps`, `chol`, `thalach`, `oldpeak`) and `8` categorical features (`sex`, `cp`, `fbs`, `restecg`, `exang`, `slope`, `ca`, `thal`).
+2. **`models.non_invasive_11`** (`C = 0.1`, `11` input features -> `21` encoded features):
+   Uses the `5` numeric features and `6` non-invasive / standard-workup categorical features (`sex`, `cp`, `fbs`, `restecg`, `exang`, `slope`), excluding `ca` and `thal`.
 
-```
-z    = intercept + coef_1*x_1 + coef_2*x_2 + ... + coef_n*x_n
-prob = 1 / (1 + exp(-z))          # the sigmoid function
-```
-
-The only complication is that the raw inputs are first **preprocessed** by the
-`ColumnTransformer` from `notebooks/common.py`. That preprocessing is also just
-arithmetic, so it can be copied out as numbers:
-
-| Step | What it does | What we export |
-|---|---|---|
-| Numeric imputer | fills missing values with the column **median** | `numeric[col].median` |
-| StandardScaler | `(x - mean) / scale` | `numeric[col].mean`, `numeric[col].scale` |
-| Categorical imputer | fills missing values with the column **mode** | `categorical[col].mode` |
-| OneHotEncoder | one 0/1 column per known category | `categorical[col].categories` (in order) |
-
-The final model sees **28** numbers: 5 standardized numeric values + 23 one-hot
-columns (2 + 4 + 2 + 3 + 2 + 3 + 4 + 3).
+### Clinical Auto-Routing Safety
+When `ca` or `thal` is missing (`null`), clients must route to **`non_invasive_11`** instead of mode-imputing `full_13` (`ca=0.0, thal=3.0`), which artificially shifts log-odds by `-2.0389`.
 
 ---
 
-## 2. The exact inference recipe
+## 2. Exact Inference & Additive Explainability (`Δz`)
 
+For the selected model block (`models[mode]`):
+
+```text
+1. NUMERIC (in numeric_cols order):
+      if missing: val = numeric[col].median
+      x = (val - numeric[col].mean) / numeric[col].scale
+      delta_z[col] = coef[offset] * x
+
+2. CATEGORICAL (in categorical_cols order):
+      if missing: val = categorical[col].mode
+      match val == categorical[col].categories[j] -> delta_z[col] = coef[offset + j]
+      (unseen category matches nothing -> delta_z[col] = 0.0)
+
+3. z    = intercept + sum(delta_z.values())
+4. prob = sigmoid(z)   # use stable exp(-z) for z >= 0 and exp(z)/(1+exp(z)) for z < 0
 ```
-1. NUMERIC (order: age, trestbps, chol, thalach, oldpeak)
-      if value is missing: value = median
-      x = (value - mean) / scale
-
-2. CATEGORICAL (order: sex, cp, fbs, restecg, exang, slope, ca, thal)
-      if value is missing: value = mode
-      for each known category c of that column:
-          x = 1.0 if value == c else 0.0
-      # a category never seen in training matches nothing  ->  all zeros
-      # this is exactly OneHotEncoder(handle_unknown="ignore")
-
-3. z    = intercept + sum(coef[i] * x[i])
-4. prob = 1 / (1 + exp(-z))
-```
-
-The concatenation order (numeric block first, then categorical block) and the
-category order inside each block matter — they must match `output_features`.
 
 ---
 
-## 3. Files
+## 3. Files & Verification
 
 | File | Purpose |
 |---|---|
-| `export_model.py` | trains the model, writes `model.json` and `golden_cases.json` |
-| `model.json` | everything needed to reproduce `predict_proba` by hand |
-| `verify_formula.py` | proves the formula matches sklearn on **all 303 rows** |
-| `golden_cases.json` | 15 inputs + expected probabilities, used by the Dart tests |
+| `export_model.py` | Confirms `C` on `X_train` (`N=242`), computes 5-fold & 10×5 repeated CV + `test_61`, embeds external summary (requires `docs/evaluation_metrics.json` unless `--allow-missing-external` is passed), writes `model.json` v2 & `golden_cases.json` v2 |
+| `model.json` | Schema `heart-risk-linear-formula/2` containing `full_13` and `non_invasive_11` (`scikit-learn==1.6.1`) |
+| `golden_cases.json` | Schema `heart-risk-golden-cases/2` (`27` cases across both modes with `probability`, `z`, `intercept`, and per-input `contributions`) |
+| `verify_formula.py` | Verifies exact in-memory formula arithmetic parity (`< 1e-12`), golden cases (`< 1e-12`), and cross-OS refit reproducibility (`< 1e-5`, `303/303` class match) |
 
----
+Run from the project root (`scikit-learn==1.6.1`):
 
-## 4. Results (real output of this export)
-
-Model: `LogisticRegression(max_iter=1000, C=1.0)`, trained on the 242-row
-training split of `data/heart.csv`.
-
-```
-train=(242, 13)  test=(61, 13)
-grid best C = 1  (CV AUC = 0.9025)
-CV ROC-AUC (train, 5-fold): 0.9025 +/- 0.0144
-TEST AUC=0.9665  recall=0.9286  precision=0.8387
-wrote model.json  (28 output features)
-wrote golden_cases.json  (15 cases)
-```
-
-`C=1` was **read from the existing GridSearchCV cell in
-`notebooks/03_modeling.ipynb`** (`Logistic Regression: AUC=0.902
-best_params_={'model__C': 1}`) and independently re-confirmed by re-running the
-identical grid (`C in [0.01, 0.1, 1, 10]`, `StratifiedKFold(n_splits=5,
-shuffle=True, random_state=42)`, scoring `roc_auc`) **on the training set only**.
-
-> The test-set numbers were looked at **once**, after `C` was frozen. Nothing was
-> tuned afterwards.
-
----
-
-## 5. How correctness is proven
-
-```
-python mobile_export/verify_formula.py
-```
-
-```
-rows compared      : 303
-max |difference|   : 3.331e-16
-mean |difference|  : 1.143e-17
-sklearn log-loss   : 0.317086
-same class @0.5    : 303/303
-RESULT: PASS (max diff 3.331e-16 < 1e-06)
-```
-
-The maximum absolute difference between the pure-Python formula and sklearn's
-`predict_proba` over all 303 rows is `3.3e-16`, i.e. floating-point noise, far
-below the required `1e-6`.
-
----
-
-## 6. How to re-run everything
-
-From the **project root** (`E:\Projects\Streamlit`):
-
-```powershell
-# 1. re-export the model + golden cases
+```bash
+python scripts/evaluate_heart.py
 python mobile_export/export_model.py
-
-# 2. check the formula against sklearn (must print PASS)
 python mobile_export/verify_formula.py
 ```
 
-Both scripts are self-contained; they import `load_split` and
-`build_preprocess` from `notebooks/common.py`, so the exported formula always
-uses exactly the same split and the same preprocessing as the notebook.
+Verified output (`verify_formula.py`, `scikit-learn==1.6.1`):
+- `full_13`: exact arithmetic `2.220e-16` (`< 1e-12`), `delta_z` additivity `0.000e+00`, cross-OS refit `2.220e-16` (`< 1e-5`), `303/303` class agreement `@0.5`.
+- `non_invasive_11`: exact arithmetic `2.220e-16` (`< 1e-12`), `delta_z` additivity `0.000e+00`, cross-OS refit `2.220e-16` (`< 1e-5`), `303/303` class agreement `@0.5`.
+- `Golden Cases v2`: `27/27` cases verified (`max |prob err| = 0.000e+00`, `max |z/intercept err| = 0.000e+00`, `max |delta_z err| = 0.000e+00`).
 
-The scripts only **read** `data/heart.csv` and **write** inside `mobile_export/`.
-`model.pkl`, `app.py` and the notebooks are never touched.
-
-### Copying into the app
-
-`android_app/assets/model.json` is a copy of `mobile_export/model.json`, and
-`android_app/test/golden_cases.json` is a copy of `mobile_export/golden_cases.json`.
-If you re-export, copy both files again:
-
-```powershell
-Copy-Item mobile_export/model.json        android_app/assets/model.json -Force
-Copy-Item mobile_export/golden_cases.json android_app/test/golden_cases.json -Force
-```
+*(Phase 2 will sync `model.json` v2 and `golden_cases.json` v2 into `android_app/` for the V2.0.0 release.)*
